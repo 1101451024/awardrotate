@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta name="format-detection" content="telephone=no" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <link rel="stylesheet" href="./css/weui.min.css" />
+    <link rel="stylesheet" href="./css/jquery-weui-no-flexible.min.css" />
+    <link rel="stylesheet" href="./css/draw.css">
+    <link rel="stylesheet" href="./css/alert.css">
+    <script src="./js/flexible_css.js,flexible.js.min.js"></script>
+    <title>转盘抽奖</title>
+</head>
+
+<body>
+        <div class="draw_index" id="draw_i">
+            <img src="images/logo.png" alt="" class="logo1">
+            <img src="images/draw_index.png" alt="" class="draw_img">
+            <div class="draw_canvas">
+                <canvas id="wheelcanvas" width="422px" height="422px"></canvas>
+            </div>
+            <img class="pointer" src="images/turnplate-pointer.png" />
+        </div>
+
+    <script src="./js/jquery-3.2.1.min.js"></script>
+    <script src="./js/jquery-weui.min.js"></script>
+    <script src="./js/awardRotate.min.js"></script>
+    <script src="./js/fastclick.min.js"></script>
+    <script src="./js/preload.min.js"></script>
+    <script src="./js/alert.js"></script>
+    <script>
+    var count = 0; //测试用
+    var loading = false;
+    var preConfig = {};
+
+    preConfig = {
+        isDebug: false,
+        sources: {
+            imgs: {
+                source: [],
+                callback: function() {
+                    if (preConfig.sources.imgs.source.length != 0) {
+                        console.log("图片文件加载完成");
+                    }
+                }
+            },
+            audio: {
+                source: [],
+                callback: function() {
+                    if (preConfig.sources.audio.source.length != 0) {
+                        console.log("音频文件加载完成");
+                    }
+                }
+            }
+        },
+        loadingOverTime: 60,
+        loadingOverTimeCB: function(res) {
+            console.log("资源加载超时：", res);
+            $.modal({
+                title: "错误",
+                text: "网络环境不太好,连接超时了,刷新重试一下吧。",
+                buttons: [
+                    { text: "好的", onClick: function() { window.location = location; } }
+                ]
+            });
+        },
+        progress: function(completedCount, total) {
+            console.log('待预加载文件数：' + (total - completedCount + 1));
+            //加载进度
+            val = Math.floor((completedCount / total) * 100);
+        },
+        completeLoad: function() {
+            console.log("已完成所有加载项");
+            //清空待预加载列表
+            clearLoadingList();
+            //渲染转盘
+            drawRouletteWheel();
+            //隐藏loading
+            $.hideLoading();
+        }
+    };
+
+    var turnplate = {
+        restaraunts: [], //大转盘奖品名称
+        colors: [], //大转盘奖品区块对应背景颜色
+        outsideRadius: 193, //大转盘外圆的半径
+        textRadius: 155, //大转盘奖品位置距离圆心的距离
+        insideRadius: 60, //大转盘内圆的半径
+        startAngle: 0, //开始角度
+        bRotate: false //false:停止;ture:旋转
+    };
+
+    //旋转转盘 item:奖品位置; txt：提示语;
+    var rotateFn = function(item, txt, win) {
+        var angles = item * (360 / turnplate.restaraunts.length) - (360 / (turnplate.restaraunts.length * 2));
+        if (angles < 270) {
+            angles = 270 - angles;
+        } else {
+            angles = 360 - angles + 270;
+        }
+        $('#wheelcanvas').stopRotate();
+        $('#wheelcanvas').rotate({
+            angle: 0,
+            animateTo: angles + 1800,
+            duration: 8000,
+            callback: function() {
+                // 提示
+                // $.alerts.alert(txt,'提示',function(){
+                //     alert('111111')
+                // })
+                // 提示2
+                // $.alerts.alert2(txt,'提示',function(){
+                //     alert('111111')
+                // })
+                // 奖品  
+                $.prealert.alert(txt,'',function(){
+                    alert('111111')
+                })
+                // $.alert(txt, '', function() {
+                //     if (win) {
+                //         //                        location.href = '<?php echo $shopUrl;?>';
+                //     } else {
+                //         //                        location.href = '<?php echo $gameUrl ?>';
+                //     }
+                // });
+                turnplate.bRotate = false;
+                //turnplate.bRotate = !turnplate.bRotate;
+            }
+        });
+    };
+
+    //预加载资源
+    function preload() {
+        $.showLoading('请稍候');
+        new Preload(preConfig);
+    }
+    //清空预加载资源列表
+    function clearLoadingList() {
+        //清空图片预加载列表
+        preConfig.sources.imgs.source = [];
+        //清空音频文件预加载列表
+        preConfig.sources.audio.source = [];
+        console.log('预加载队列已清空');
+    }
+
+
+    function rnd(n, m) {
+        var random = Math.floor(Math.random() * (m - n + 1) + n);
+        return random;
+    }
+
+    //页面所有元素加载完毕后执行drawRouletteWheel()方法对转盘进行渲染
+    window.onload = function() {
+
+        drawRouletteWheel();
+        $(".kePublic").on("touchstart", function(e) {
+            e.preventDefault();
+        });
+    };
+
+    //渲染转盘
+    function drawRouletteWheel() {
+        var canvas = document.getElementById("wheelcanvas");
+        if (canvas.getContext) {
+            //根据奖品个数计算圆周角度
+            var arc = Math.PI / (turnplate.restaraunts.length / 2);
+            var ctx = canvas.getContext("2d");
+            //在给定矩形内清空一个矩形
+            ctx.clearRect(0, 0, 422, 422);
+            //strokeStyle 属性设置或返回用于笔触的颜色、渐变或模式
+            ctx.strokeStyle = "rgba(0,0,0,0)";
+            //font 属性设置或返回画布上文本内容的当前字体属性
+            ctx.font = '20px Microsoft YaHei';
+            // ctx.lineWidth = 1.5;
+            for (var i = 0; i < turnplate.restaraunts.length; i++) {
+                var angle = turnplate.startAngle + i * arc;
+                ctx.fillStyle = turnplate.colors[i];
+                ctx.beginPath();
+                //arc(x,y,r,起始角,结束角,绘制方向) 方法创建弧/曲线（用于创建圆或部分圆）
+                ctx.arc(211, 211, turnplate.outsideRadius, angle, angle + arc, false);
+                ctx.arc(211, 211, turnplate.insideRadius, angle + arc, angle, true);
+                ctx.stroke();
+                ctx.fill();
+                //锁画布(为了保存之前的画布状态)
+                ctx.save();
+
+                //----绘制奖品开始----
+                ctx.strokeStyle = "rgba(0,0,0,0)";
+                var text = turnplate.restaraunts[i];
+
+                var line_height = 30;
+                //translate方法重新映射画布上的 (0,0) 位置
+                ctx.translate(211 + Math.cos(angle + arc / 2) * turnplate.textRadius, 211 + Math.sin(angle + arc / 2) * turnplate.textRadius);
+
+                //rotate方法旋转当前的绘图
+                ctx.rotate(angle + arc / 2 + Math.PI / 2);
+                /** 下面代码根据奖品类型、奖品名称长度渲染不同效果，如字体、颜色、图片效果。(具体根据实际情况改变) **/
+                if (i % 2 == 0) {
+                    //字体描边    
+                    // ctx.fillStyle = "#f7ee3d";
+                    // ctx.strokeStyle = "#000";
+                    // ctx.fillStyle = "rgba(0,0,0,0)"
+
+                } else {
+                    //字体描边     
+                    // ctx.fillStyle = "#f7ee3d";
+                    // ctx.strokeStyle = "#000";
+                    // ctx.fillStyle = "#964d23"
+                    
+                }
+                ctx.fillStyle = "rgba(0,0,0,0)"
+
+                text = text.substring(0, 4) + "||" + text.substring(4);
+                var texts = text.split("||");
+                for (var j = 0; j < texts.length; j++) {
+                    ctx.fillText(texts[j], -ctx.measureText(texts[j]).width / 2, j * line_height + 20);
+                    //字体描边
+                    // ctx.strokeText(texts[j], -ctx.measureText(texts[j]).width / 2, j * line_height + 19);
+
+                }
+
+                ctx.restore();
+            }
+        }
+    }
+
+    $(document).ready(function() {
+
+        //预加载图片
+        preConfig.sources.imgs.source = [
+            'images/turnplate-pointer.png'
+        ];
+        console.log(preConfig.sources.imgs.source);
+        preload();//开始预加载
+
+
+        //动态添加大转盘的奖品与奖品区域背景颜色
+        turnplate.restaraunts = ["娥佩兰莹润滋养唇膏", "门店立减券", "随机品牌口红","天猫平台满减券", "京东平台满减券", "谢谢参与"];
+        //字体描边
+        // turnplate.colors = ["#fefefe", "#fdf5dc", "#fefefe", "#fdf5dc", "#fefefe", "#fdf5dc"];
+        turnplate.colors = ["rgba(0,0,0,0)", "rgba(0,0,0,0)", "rgba(0,0,0,0)", "rgba(0,0,0,0)", "rgba(0,0,0,0)", "rgba(0,0,0,0)"];
+
+        var rotateTimeOut = function() {
+            $('#wheelcanvas').rotate({
+                angle: 0,
+                animateTo: 2160,
+                duration: 8000,
+                callback: function() {
+                    $.alert("网络超时，请检查您的网络设置！");
+                }
+            });
+        };
+
+        //点击抽奖
+        $('.pointer').on("touchend", function(e) {
+            e.preventDefault();
+            //测试用
+            rotateFn(1, '恭喜你中奖了~', '一巴掌');
+
+            if (turnplate.bRotate) {
+                return;
+            }
+            turnplate.bRotate = true;
+
+            $.ajax({
+                type: 'get',
+                //                url: '', /* 获取服务器传来的参数，转动转盘到指定奖项 */
+                dataType: 'json',
+                beforeSend: function() {
+                    $.showLoading("请稍候");
+                },
+                success: function(json) {
+                    $.hideLoading();
+                    if (json.err_code != 0) {
+                        if (json.err_code == 1) {
+                            $.alert(json.err_msg, '', function() {
+                                //                                location.href = "<?php echo $gameUrl ?>"
+                            });
+                        } else {
+                            $.alert(json.err_msg);
+                        }
+                        turnplate.bRotate = false;
+                    } else {
+                        var data = json.data;
+                        var item = data.vid;
+                        rotateFn(item, data.text, data.win);
+                    }
+                },
+                error: function() {
+                    //测试，暂时注释掉
+                    $.hideLoading(); //测试，暂时
+                    //                    $.alert('抽奖失败,请重新抽奖~', '', function () {
+                    //                        window.location = location;
+                    //                    });
+                }
+            });
+        });
+
+
+        // $('#btn_cha').on('click',function() {
+        //     $('#tip').hide();
+        // }) 
+    });
+
+    </script>
+</body>
+
+</html>
